@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mapa Allcanci MG</title>
+  <meta name="description" content="Mapa interativo de clientes da Allcanci em Minas Gerais por etapa comercial.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar__brand">
+        <p class="eyebrow">Github Pages</p>
+        <h1>Mapa Allcanci MG</h1>
+        <p class="subtitle">Clientes e etapas comerciais distribuídos em Minas Gerais, posicionados pelo centro aproximado de cada bairro.</p>
+      </div>
+
+      <section class="sidebar__panel">
+        <div class="panel-heading">
+          <h2>Camadas</h2>
+          <button id="mobile-close" class="ghost-button" type="button" aria-label="Fechar painel">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <div class="toggle-list" id="toggle-list"></div>
+      </section>
+
+      <section class="sidebar__panel">
+        <h2>Resumo</h2>
+        <dl class="stats" id="stats"></dl>
+      </section>
+
+      <section class="sidebar__panel">
+        <h2>Leitura do mapa</h2>
+        <ul class="notes">
+          <li>Use as chaves para combinar camadas livremente.</li>
+          <li>Os agrupamentos se reorganizam conforme o zoom para evitar sobreposição excessiva.</li>
+          <li>Ao clicar em um marcador, você vê cliente, endereço e categoria.</li>
+        </ul>
+      </section>
+    </aside>
+
+    <main class="map-stage">
+      <button id="mobile-open" class="mobile-open" type="button">
+        <i class="fa-solid fa-sliders"></i>
+        Camadas
+      </button>
+      <div id="map"></div>
+      <div class="map-badge">
+        <span class="badge-dot"></span>
+        Minas Gerais
+      </div>
+      <div class="loading" id="loading">
+        <div class="loading__card">
+          <div class="loading__pulse"></div>
+          <p>Carregando mapa e clientes...</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
