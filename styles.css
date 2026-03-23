@@ -339,6 +339,46 @@ body { min-height: 100vh; }
   line-height: 1.5;
 }
 
+.legend-card {
+  min-width: 196px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(32, 49, 54, 0.08);
+  box-shadow: 0 16px 34px rgba(17, 24, 28, 0.16);
+  color: var(--text);
+}
+
+.legend-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.legend-subtitle {
+  margin: 4px 0 10px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.78rem;
+}
+
+.legend-row + .legend-row {
+  margin-top: 6px;
+}
+
+.legend-swatch {
+  width: 18px;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(17, 24, 28, 0.08);
+  flex: 0 0 auto;
+}
+
 .city-tooltip {
   background: rgba(255, 255, 255, 0.94);
   border: none;

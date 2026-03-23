@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import gzip
 import json
 import shutil
 import time
 import urllib.parse
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any
+
+import shapefile
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -17,12 +21,20 @@ EXTERNAL_SOURCE_JSON = REPO_ROOT.parent / "Planilhas_Clientes" / "clientes_por_e
 CACHE_FILE = SOURCE_DIR / "neighborhood_geocode_cache.json"
 CLIENTS_GEOJSON = DATA_DIR / "clients.geojson"
 MINAS_GEOJSON = DATA_DIR / "minas-gerais.geojson"
+DENSITY_GEOJSON = DATA_DIR / "municipal-density-ibge.geojson"
 REPORT_JSON = DATA_DIR / "build-report.json"
+OFFICIAL_MG_MUNICIPAL_ZIP = SOURCE_DIR / "MG_Municipios_2022.zip"
+OFFICIAL_MG_MUNICIPAL_DIR = SOURCE_DIR / "MG_Municipios_2022"
+OFFICIAL_MG_MUNICIPAL_SHP = OFFICIAL_MG_MUNICIPAL_DIR / "MG_Municipios_2022.shp"
 
-MINAS_GEOJSON_URL = "https://raw.githubusercontent.com/codeforgermany/click_that_hood/main/public/data/brazil-states.geojson"
+MINAS_GEOJSON_URL = "https://servicodados.ibge.gov.br/api/v3/malhas/estados/31?formato=application/vnd.geo+json&qualidade=minima"
+IBGE_MG_MUNICIPAL_ZIP_URL = "https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/municipio_2022/UFs/MG/MG_Municipios_2022.zip"
+IBGE_SIDRA_DENSITY_URL = "https://apisidra.ibge.gov.br/values/t/4714/n3/31/n6/all/v/93,6318,614/p/2022"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "mapa-allcanci-mg/1.0 (github pages build)"
 REQUEST_DELAY_SECONDS = 1.1
+SIMPLIFY_TOLERANCE = 0.003
+MOJIBAKE_MARKERS = ("Ã", "â", "�")
 
 CITY_ALIASES = {
     "afenas": "Alfenas",
@@ -62,6 +74,28 @@ def ensure_dirs() -> None:
     SOURCE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def fix_mojibake_text(value: str) -> str:
+    if not any(marker in value for marker in MOJIBAKE_MARKERS):
+        return value
+    try:
+        return value.encode("latin1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+
+
+def normalize_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return fix_mojibake_text(value)
+    if isinstance(value, list):
+        return [normalize_value(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            normalize_value(key) if isinstance(key, str) else key: normalize_value(item)
+            for key, item in value.items()
+        }
+    return value
+
+
 def load_source_data() -> dict[str, Any]:
     if EXTERNAL_SOURCE_JSON.exists():
         shutil.copyfile(EXTERNAL_SOURCE_JSON, SOURCE_JSON_IN_REPO)
@@ -69,30 +103,37 @@ def load_source_data() -> dict[str, Any]:
         raise FileNotFoundError(
             f"Source JSON not found in {EXTERNAL_SOURCE_JSON} or {SOURCE_JSON_IN_REPO}"
         )
-    return json.loads(SOURCE_JSON_IN_REPO.read_text(encoding="utf-8"))
+
+    source_data = normalize_value(json.loads(SOURCE_JSON_IN_REPO.read_text(encoding="utf-8")))
+    SOURCE_JSON_IN_REPO.write_text(
+        json.dumps(source_data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return source_data
 
 
 def download_json(url: str) -> Any:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=60) as response:
-        return json.load(response)
+        raw = response.read()
+    if raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    return json.loads(raw.decode("utf-8"))
+
+
+def download_bytes(url: str) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=240) as response:
+        return response.read()
 
 
 def fetch_minas_geojson() -> dict[str, Any]:
-    collection = download_json(MINAS_GEOJSON_URL)
-    for feature in collection["features"]:
-        name = (
-            feature.get("properties", {}).get("name")
-            or feature.get("properties", {}).get("nome")
-            or ""
-        )
-        if name == "Minas Gerais":
-            MINAS_GEOJSON.write_text(
-                json.dumps(feature, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            return feature
-    raise RuntimeError("Could not find Minas Gerais feature in boundary GeoJSON")
+    feature = download_json(MINAS_GEOJSON_URL)
+    MINAS_GEOJSON.write_text(
+        json.dumps(feature, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    return feature
 
 
 def load_cache() -> dict[str, Any]:
@@ -116,6 +157,201 @@ def normalize_city(value: str) -> str:
 
 def canonical_location_key(neighborhood: str, city: str) -> str:
     return f"{clean_text(neighborhood).lower()}|{normalize_city(city).lower()}"
+
+
+def ensure_official_municipal_files() -> Path:
+    if not OFFICIAL_MG_MUNICIPAL_ZIP.exists():
+        OFFICIAL_MG_MUNICIPAL_ZIP.write_bytes(download_bytes(IBGE_MG_MUNICIPAL_ZIP_URL))
+
+    if not OFFICIAL_MG_MUNICIPAL_SHP.exists():
+        OFFICIAL_MG_MUNICIPAL_DIR.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(OFFICIAL_MG_MUNICIPAL_ZIP, "r") as zipped:
+            zipped.extractall(OFFICIAL_MG_MUNICIPAL_DIR)
+
+    return OFFICIAL_MG_MUNICIPAL_SHP
+
+
+def load_sidra_density_rows() -> list[dict[str, Any]]:
+    rows = download_json(IBGE_SIDRA_DENSITY_URL)
+    return rows[1:]
+
+
+def parse_sidra_value(value: Any) -> float:
+    raw = str(value)
+    if "," in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    return float(raw)
+
+
+def density_index() -> dict[str, dict[str, Any]]:
+    rows = load_sidra_density_rows()
+    metrics: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if row.get("NC") != "6":
+            continue
+
+        code = str(row["D1C"])
+        entry = metrics.setdefault(
+            code,
+            {
+                "code": code,
+                "name": str(row["D1N"]).replace(" (MG)", ""),
+            },
+        )
+
+        variable = str(row["D2C"])
+        value = parse_sidra_value(row["V"])
+        if variable == "93":
+            entry["population"] = int(round(value))
+        elif variable == "6318":
+            entry["areaKm2"] = float(value)
+        elif variable == "614":
+            entry["density"] = float(value)
+
+    return metrics
+
+
+def round_coordinates(coords: Any, decimals: int = 5) -> Any:
+    if isinstance(coords, (list, tuple)):
+        if coords and isinstance(coords[0], (int, float)):
+            return [round(float(coords[0]), decimals), round(float(coords[1]), decimals)]
+        return [round_coordinates(item, decimals) for item in coords]
+    return coords
+
+
+def perpendicular_distance(point: list[float], start: list[float], end: list[float]) -> float:
+    if start == end:
+        return ((point[0] - start[0]) ** 2 + (point[1] - start[1]) ** 2) ** 0.5
+    numerator = abs(
+        (end[0] - start[0]) * (start[1] - point[1])
+        - (start[0] - point[0]) * (end[1] - start[1])
+    )
+    denominator = ((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2) ** 0.5
+    return numerator / denominator
+
+
+def simplify_line(points: list[list[float]], tolerance: float) -> list[list[float]]:
+    if len(points) <= 2:
+        return points
+
+    max_distance = -1.0
+    index = -1
+    start = points[0]
+    end = points[-1]
+
+    for current_index in range(1, len(points) - 1):
+        distance = perpendicular_distance(points[current_index], start, end)
+        if distance > max_distance:
+            max_distance = distance
+            index = current_index
+
+    if max_distance > tolerance:
+        left = simplify_line(points[: index + 1], tolerance)
+        right = simplify_line(points[index:], tolerance)
+        return left[:-1] + right
+
+    return [start, end]
+
+
+def simplify_ring(points: list[list[float]], tolerance: float) -> list[list[float]]:
+    if len(points) <= 4:
+        return points
+
+    closed = points[0] == points[-1]
+    working = points[:-1] if closed else points[:]
+    simplified = simplify_line(working, tolerance)
+
+    if len(simplified) < 3:
+        simplified = working[:3]
+
+    if closed:
+        simplified.append(simplified[0])
+
+    return simplified
+
+
+def simplify_geometry(geometry: dict[str, Any], tolerance: float) -> dict[str, Any]:
+    geom_type = geometry["type"]
+    coords = geometry["coordinates"]
+
+    if geom_type == "Polygon":
+        simplified = [simplify_ring(ring, tolerance) for ring in coords]
+    elif geom_type == "MultiPolygon":
+        simplified = [
+            [simplify_ring(ring, tolerance) for ring in polygon]
+            for polygon in coords
+        ]
+    else:
+        simplified = coords
+
+    return {
+        "type": geom_type,
+        "coordinates": round_coordinates(simplified, 5),
+    }
+
+
+def build_density_geojson() -> dict[str, Any]:
+    shp_path = ensure_official_municipal_files()
+    densities = density_index()
+
+    reader = shapefile.Reader(str(shp_path), encoding="latin1")
+    features: list[dict[str, Any]] = []
+    density_values: list[float] = []
+    area_values: list[float] = []
+    population_values: list[int] = []
+
+    try:
+        for shape_record in reader.iterShapeRecords():
+            record = shape_record.record.as_dict()
+            code = str(record["CD_MUN"])
+            data = densities.get(code)
+            if not data:
+                continue
+
+            geometry = simplify_geometry(shape_record.shape.__geo_interface__, SIMPLIFY_TOLERANCE)
+
+            density_values.append(float(data["density"]))
+            area_values.append(float(data["areaKm2"]))
+            population_values.append(int(data["population"]))
+
+            features.append(
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "code": code,
+                        "name": record["NM_MUN"],
+                        "uf": record["SIGLA_UF"],
+                        "population": int(data["population"]),
+                        "areaKm2": float(data["areaKm2"]),
+                        "density": float(data["density"]),
+                        "source": "IBGE Censo Demográfico 2022 / tabela 4714",
+                    },
+                    "geometry": geometry,
+                }
+            )
+    finally:
+        reader.close()
+
+    collection = {
+        "type": "FeatureCollection",
+        "metadata": {
+            "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "sourceBoundary": IBGE_MG_MUNICIPAL_ZIP_URL,
+            "sourceDensity": IBGE_SIDRA_DENSITY_URL,
+            "municipalityCount": len(features),
+            "densityMin": min(density_values),
+            "densityMax": max(density_values),
+            "populationMax": max(population_values),
+            "areaMax": max(area_values),
+            "year": 2022,
+        },
+        "features": features,
+    }
+    DENSITY_GEOJSON.write_text(
+        json.dumps(collection, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    return collection
 
 
 def query_nominatim(query: str) -> list[dict[str, Any]]:
@@ -217,6 +453,8 @@ def build_geocode_index(source_data: dict[str, Any]) -> tuple[dict[str, Any], li
         time.sleep(REQUEST_DELAY_SECONDS)
 
     for key, value in cache.items():
+        if key not in locations:
+            continue
         if value.get("status") != "ok":
             unresolved.append(key)
 
@@ -305,13 +543,16 @@ def main() -> int:
     ensure_dirs()
     source_data = load_source_data()
     fetch_minas_geojson()
+    density_geojson = build_density_geojson()
     geocode_index, unresolved = build_geocode_index(source_data)
     geojson = build_clients_geojson(source_data, geocode_index)
 
     print(f"Features written: {geojson['metadata']['totalFeatures']}")
+    print(f"Municipal density polygons: {density_geojson['metadata']['municipalityCount']}")
     print(f"Unresolved locations: {len(unresolved)}")
     print(f"Skipped rows: {geojson['metadata']['skippedCount']}")
     print(f"GeoJSON: {CLIENTS_GEOJSON}")
+    print(f"Density layer: {DENSITY_GEOJSON}")
     print(f"Boundary: {MINAS_GEOJSON}")
     return 0
 
