@@ -20,16 +20,19 @@ SOURCE_JSON_IN_REPO = SOURCE_DIR / "clientes_por_etapa_comercial.json"
 EXTERNAL_SOURCE_JSON = REPO_ROOT.parent / "Planilhas_Clientes" / "clientes_por_etapa_comercial.json"
 CACHE_FILE = SOURCE_DIR / "neighborhood_geocode_cache.json"
 CLIENTS_GEOJSON = DATA_DIR / "clients.geojson"
-MINAS_GEOJSON = DATA_DIR / "minas-gerais.geojson"
+BRAZIL_GEOJSON = DATA_DIR / "brasil.geojson"
 DENSITY_GEOJSON = DATA_DIR / "municipal-density-ibge.geojson"
 REPORT_JSON = DATA_DIR / "build-report.json"
-OFFICIAL_MG_MUNICIPAL_ZIP = SOURCE_DIR / "MG_Municipios_2022.zip"
-OFFICIAL_MG_MUNICIPAL_DIR = SOURCE_DIR / "MG_Municipios_2022"
-OFFICIAL_MG_MUNICIPAL_SHP = OFFICIAL_MG_MUNICIPAL_DIR / "MG_Municipios_2022.shp"
+OFFICIAL_BR_MUNICIPAL_ZIP = SOURCE_DIR / "BR_Municipios_2022.zip"
+OFFICIAL_BR_MUNICIPAL_DIR = SOURCE_DIR / "BR_Municipios_2022"
+OFFICIAL_BR_MUNICIPAL_SHP = OFFICIAL_BR_MUNICIPAL_DIR / "BR_Municipios_2022.shp"
 
-MINAS_GEOJSON_URL = "https://servicodados.ibge.gov.br/api/v3/malhas/estados/31?formato=application/vnd.geo+json&qualidade=minima"
-IBGE_MG_MUNICIPAL_ZIP_URL = "https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/municipio_2022/UFs/MG/MG_Municipios_2022.zip"
-IBGE_SIDRA_DENSITY_URL = "https://apisidra.ibge.gov.br/values/t/4714/n3/31/n6/all/v/93,6318,614/p/2022"
+BRAZIL_GEOJSON_URL = "https://servicodados.ibge.gov.br/api/v3/malhas/paises/BR?formato=application/vnd.geo+json&qualidade=minima"
+IBGE_BR_MUNICIPAL_ZIP_URL = "https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/municipio_2022/Brasil/BR/BR_Municipios_2022.zip"
+IBGE_BR_MUNICIPAL_ZIP_FALLBACK_URLS = [
+    "https://ftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/municipio_2022/Brasil/BR/BR_Municipios_2022.zip",
+]
+IBGE_SIDRA_DENSITY_URL = "https://apisidra.ibge.gov.br/values/t/4714/n3/all/n6/all/v/93,6318,614/p/2022"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "mapa-allcanci-mg/1.0 (github pages build)"
 REQUEST_DELAY_SECONDS = 1.1
@@ -127,9 +130,9 @@ def download_bytes(url: str) -> bytes:
         return response.read()
 
 
-def fetch_minas_geojson() -> dict[str, Any]:
-    feature = download_json(MINAS_GEOJSON_URL)
-    MINAS_GEOJSON.write_text(
+def fetch_brazil_geojson() -> dict[str, Any]:
+    feature = download_json(BRAZIL_GEOJSON_URL)
+    BRAZIL_GEOJSON.write_text(
         json.dumps(feature, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
     )
@@ -155,20 +158,46 @@ def normalize_city(value: str) -> str:
     return CITY_ALIASES.get(cleaned.lower(), cleaned)
 
 
-def canonical_location_key(neighborhood: str, city: str) -> str:
-    return f"{clean_text(neighborhood).lower()}|{normalize_city(city).lower()}"
+def normalize_state(value: Any) -> str:
+    cleaned = clean_text(value)
+    if not cleaned:
+        return ""
+    return cleaned.upper()[:2]
+
+
+def row_state(row: dict[str, Any]) -> str:
+    return normalize_state(row.get("state") or row.get("uf") or row.get("estado") or "")
+
+
+def canonical_location_key(neighborhood: str, city: str, state: str = "") -> str:
+    return (
+        f"{clean_text(neighborhood).lower()}|"
+        f"{normalize_city(city).lower()}|"
+        f"{normalize_state(state).lower()}"
+    )
 
 
 def ensure_official_municipal_files() -> Path:
-    if not OFFICIAL_MG_MUNICIPAL_ZIP.exists():
-        OFFICIAL_MG_MUNICIPAL_ZIP.write_bytes(download_bytes(IBGE_MG_MUNICIPAL_ZIP_URL))
+    if not OFFICIAL_BR_MUNICIPAL_ZIP.exists():
+        errors: list[str] = []
+        for url in [IBGE_BR_MUNICIPAL_ZIP_URL, *IBGE_BR_MUNICIPAL_ZIP_FALLBACK_URLS]:
+            try:
+                OFFICIAL_BR_MUNICIPAL_ZIP.write_bytes(download_bytes(url))
+                break
+            except Exception as error:  # noqa: BLE001
+                errors.append(f"{url} -> {error}")
+        else:
+            raise RuntimeError(
+                "Não foi possível baixar a malha municipal BR do IBGE. Tentativas:\n"
+                + "\n".join(errors)
+            )
 
-    if not OFFICIAL_MG_MUNICIPAL_SHP.exists():
-        OFFICIAL_MG_MUNICIPAL_DIR.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(OFFICIAL_MG_MUNICIPAL_ZIP, "r") as zipped:
-            zipped.extractall(OFFICIAL_MG_MUNICIPAL_DIR)
+    if not OFFICIAL_BR_MUNICIPAL_SHP.exists():
+        OFFICIAL_BR_MUNICIPAL_DIR.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(OFFICIAL_BR_MUNICIPAL_ZIP, "r") as zipped:
+            zipped.extractall(OFFICIAL_BR_MUNICIPAL_DIR)
 
-    return OFFICIAL_MG_MUNICIPAL_SHP
+    return OFFICIAL_BR_MUNICIPAL_SHP
 
 
 def load_sidra_density_rows() -> list[dict[str, Any]]:
@@ -195,7 +224,7 @@ def density_index() -> dict[str, dict[str, Any]]:
             code,
             {
                 "code": code,
-                "name": str(row["D1N"]).replace(" (MG)", ""),
+                "name": str(row["D1N"]).split(" (")[0],
             },
         )
 
@@ -336,8 +365,9 @@ def build_density_geojson() -> dict[str, Any]:
         "type": "FeatureCollection",
         "metadata": {
             "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "sourceBoundary": IBGE_MG_MUNICIPAL_ZIP_URL,
+            "sourceBoundary": IBGE_BR_MUNICIPAL_ZIP_URL,
             "sourceDensity": IBGE_SIDRA_DENSITY_URL,
+            "scope": "BR",
             "municipalityCount": len(features),
             "densityMin": min(density_values),
             "densityMax": max(density_values),
@@ -377,15 +407,15 @@ def geocode_location(location: dict[str, Any]) -> dict[str, Any] | None:
     neighborhood = clean_text(location["neighborhood"])
     city = clean_text(location["city"])
     street = clean_text(location["street_number"])
+    state = normalize_state(location.get("state", ""))
+    locality_suffix = ", ".join(part for part in [city, state, "Brasil"] if part)
 
     candidate_queries = [
-        ("neighborhood", f"{neighborhood}, {city}, Minas Gerais, Brasil"),
+        ("neighborhood", f"{neighborhood}, {locality_suffix}"),
     ]
     if street:
-        candidate_queries.append(
-            ("address", f"{street}, {neighborhood}, {city}, Minas Gerais, Brasil")
-        )
-    candidate_queries.append(("city", f"{city}, Minas Gerais, Brasil"))
+        candidate_queries.append(("address", f"{street}, {neighborhood}, {locality_suffix}"))
+    candidate_queries.append(("city", locality_suffix))
 
     for source, query in candidate_queries:
         try:
@@ -412,11 +442,13 @@ def build_locations_index(source_data: dict[str, Any]) -> dict[str, dict[str, An
         for row in rows:
             neighborhood = clean_text(row["neighborhood"])
             city = clean_text(row["city"])
-            key = canonical_location_key(neighborhood, city)
+            state = row_state(row)
+            key = canonical_location_key(neighborhood, city, state)
             if key not in locations:
                 locations[key] = {
                     "neighborhood": neighborhood,
                     "city": normalize_city(city),
+                    "state": state,
                     "street_number": clean_text(row["street_number"]),
                 }
     return locations
@@ -476,6 +508,7 @@ def feature_for_row(
             "streetNumber": clean_text(row["street_number"]),
             "neighborhood": clean_text(row["neighborhood"]),
             "city": normalize_city(row["city"]),
+            "state": row_state(row),
             "companyId": row.get("company_id"),
             "dealIds": row.get("deal_ids") or [],
             "geocodeSource": geocode["source"],
@@ -496,7 +529,7 @@ def build_clients_geojson(source_data: dict[str, Any], geocode_index: dict[str, 
     for category in CATEGORY_CONFIG:
         category_count = 0
         for row in source_data["sheets"][category["source_label"]]:
-            key = canonical_location_key(row["neighborhood"], row["city"])
+            key = canonical_location_key(row["neighborhood"], row["city"], row_state(row))
             geocode = geocode_index.get(key)
             if not geocode or geocode.get("status") != "ok":
                 skipped.append(
@@ -542,7 +575,7 @@ def build_clients_geojson(source_data: dict[str, Any], geocode_index: dict[str, 
 def main() -> int:
     ensure_dirs()
     source_data = load_source_data()
-    fetch_minas_geojson()
+    fetch_brazil_geojson()
     density_geojson = build_density_geojson()
     geocode_index, unresolved = build_geocode_index(source_data)
     geojson = build_clients_geojson(source_data, geocode_index)
@@ -553,7 +586,7 @@ def main() -> int:
     print(f"Skipped rows: {geojson['metadata']['skippedCount']}")
     print(f"GeoJSON: {CLIENTS_GEOJSON}")
     print(f"Density layer: {DENSITY_GEOJSON}")
-    print(f"Boundary: {MINAS_GEOJSON}")
+    print(f"Boundary: {BRAZIL_GEOJSON}")
     return 0
 
 

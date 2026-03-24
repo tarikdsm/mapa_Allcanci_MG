@@ -1,6 +1,6 @@
-# Mapa Allcanci MG
+# Mapa Allcanci Brasil
 
-Mapa web interativo publicado em GitHub Pages para visualizar clientes da Allcanci em Minas Gerais por etapa comercial, com uma camada adicional oficial de densidade populacional do IBGE.
+Mapa web interativo publicado em GitHub Pages para visualizar clientes da Allcanci no Brasil por etapa comercial, com uma camada oficial de densidade populacional municipal do IBGE.
 
 ## Links
 
@@ -26,7 +26,7 @@ Mapa web interativo publicado em GitHub Pages para visualizar clientes da Allcan
 
 - Última base gerada em `2026-03-23T23:57:15Z`
 - `651` pontos de clientes publicados
-- `853` municípios de Minas Gerais na camada de densidade
+- `853` municípios na camada de densidade (snapshot antigo, ainda recortado)
 - `0` registros ignorados por falta de geocodificação neste snapshot
 
 Distribuição atual dos clientes no mapa:
@@ -42,7 +42,7 @@ Distribuição atual dos clientes no mapa:
 - `app.js`: lógica do mapa, toggles, popups, clusterização e camada IBGE
 - `styles.css`: layout, responsividade e identidade visual
 - `data/clients.geojson`: pontos dos clientes
-- `data/minas-gerais.geojson`: contorno do estado
+- `data/brasil.geojson`: contorno do Brasil
 - `data/municipal-density-ibge.geojson`: densidade demográfica municipal oficial
 - `data/source/clientes_por_etapa_comercial.json`: snapshot local da base consumida pelo mapa
 - `scripts/prepare_map_data.py`: pipeline de preparação de dados
@@ -79,7 +79,7 @@ O script abaixo:
 
 - lê `../Planilhas_Clientes/clientes_por_etapa_comercial.json` se esse arquivo existir
 - caso contrário, usa o snapshot já versionado em `data/source/clientes_por_etapa_comercial.json`
-- atualiza o contorno de Minas Gerais
+- atualiza o contorno do Brasil
 - atualiza a camada oficial de densidade do IBGE
 - reaproveita o cache local de geocodificação por bairro/cidade
 - gera os GeoJSONs públicos usados pelo site
@@ -91,7 +91,7 @@ python scripts\prepare_map_data.py
 Arquivos de saída:
 
 - `data/clients.geojson`
-- `data/minas-gerais.geojson`
+- `data/brasil.geojson`
 - `data/municipal-density-ibge.geojson`
 - `data/build-report.json`
 
@@ -110,7 +110,7 @@ Fluxo:
 
 - Snapshot de clientes oriundo do fluxo Bitrix24 do projeto principal
 - Geocodificação aproximada por bairro/cidade via Nominatim/OpenStreetMap
-- Contorno estadual oficial do IBGE
+- Contorno oficial do território brasileiro (IBGE)
 - Densidade demográfica municipal oficial do IBGE, Censo 2022, tabela SIDRA 4714
 
 ## Leitura recomendada

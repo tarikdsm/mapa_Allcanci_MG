@@ -38,7 +38,7 @@ python scripts\prepare_map_data.py
 Esse comando:
 
 - atualiza ou reaproveita o snapshot de clientes
-- baixa a malha oficial do IBGE se necessário
+- baixa a malha oficial do Brasil e dos municípios (IBGE) se necessário
 - baixa os indicadores SIDRA do IBGE
 - usa o cache de geocodificação já salvo
 - gera os arquivos finais do site
