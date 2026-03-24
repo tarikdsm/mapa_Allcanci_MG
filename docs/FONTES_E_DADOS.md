@@ -83,7 +83,7 @@ Cache local:
 
 Chave lógica do cache:
 
-- `bairro|cidade`
+- `bairro|cidade|uf` (UF opcional no snapshot)
 
 Objetivo:
 
@@ -92,15 +92,15 @@ Objetivo:
 
 ## Dados oficiais do IBGE
 
-### Contorno estadual
+### Contorno nacional
 
 Arquivo gerado:
 
-- `data/minas-gerais.geojson`
+- `data/brasil.geojson`
 
 Fonte:
 
-- malha de estado de Minas Gerais via serviço público do IBGE
+- malha de país (Brasil) via serviço público do IBGE
 
 ### Densidade demográfica municipal
 
@@ -110,7 +110,7 @@ Arquivo gerado:
 
 Fontes oficiais:
 
-- malha municipal MG 2022 do IBGE
+- malha municipal Brasil 2022 do IBGE
 - SIDRA/IBGE, tabela `4714`, Censo Demográfico `2022`
 
 Indicadores usados:
@@ -130,7 +130,7 @@ Metadados atuais da camada:
 ## Arquivos gerados pelo pipeline
 
 - `data/clients.geojson`
-- `data/minas-gerais.geojson`
+- `data/brasil.geojson`
 - `data/municipal-density-ibge.geojson`
 - `data/build-report.json`
 
@@ -144,7 +144,7 @@ Versionado:
 
 Não versionado:
 
-- `data/source/MG_Municipios_2022.zip`
-- `data/source/MG_Municipios_2022/`
+- `data/source/BR_Municipios_2022.zip`
+- `data/source/BR_Municipios_2022/`
 
 Esses arquivos brutos do shapefile do IBGE são baixados automaticamente e ignorados no Git.

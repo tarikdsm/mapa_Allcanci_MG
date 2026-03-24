@@ -44,8 +44,8 @@ O projeto é uma aplicação web estática publicada em GitHub Pages. Não exist
 - `data/clients.geojson`
   - pontos de clientes para as camadas comerciais
 
-- `data/minas-gerais.geojson`
-  - limite estadual de Minas Gerais
+- `data/brasil.geojson`
+  - limite do território brasileiro
 
 - `data/municipal-density-ibge.geojson`
   - polígonos municipais com densidade demográfica oficial
@@ -72,10 +72,10 @@ Camada especial:
 flowchart TD
     A["Snapshot clientes Bitrix24"] --> B["prepare_map_data.py"]
     C["Cache geocodificação bairro/cidade"] --> B
-    D["IBGE malha municipal MG"] --> B
+    D["IBGE malha municipal BR"] --> B
     E["IBGE SIDRA tabela 4714"] --> B
     B --> F["data/clients.geojson"]
-    B --> G["data/minas-gerais.geojson"]
+    B --> G["data/brasil.geojson"]
     B --> H["data/municipal-density-ibge.geojson"]
     B --> I["data/build-report.json"]
     F --> J["GitHub Pages"]

@@ -54,20 +54,43 @@ const DENSITY_COLORS = [
   "#6b21a8",
   "#3b0764",
 ];
+const DENSITY_PRESETS = {
+  all: { label: "Sem recorte (todas)", min: 0, max: Infinity },
+  high: { label: "Alta densidade (>= 120)", min: 120, max: Infinity },
+  veryHigh: { label: "Muito alta (>= 500)", min: 500, max: Infinity },
+  extreme: { label: "Extrema (>= 1000)", min: 1000, max: Infinity },
+};
 
 const ui = {
   map: null,
   clientGroups: {},
+  clientEntriesByCategory: {},
   counts: {},
+  visibleCounts: {},
+  clientsFeatureCollection: null,
   loading: document.getElementById("loading"),
   toggleList: document.getElementById("toggle-list"),
   stats: document.getElementById("stats"),
   sidebar: document.getElementById("sidebar"),
   mobileOpen: document.getElementById("mobile-open"),
   mobileClose: document.getElementById("mobile-close"),
+  densityDecisionPanel: null,
+  densityPresetSelect: null,
+  densityMinInput: null,
+  densityMaxInput: null,
+  densityApplyToClients: null,
+  densitySummary: null,
+  densityCityUfIndex: new Map(),
+  densityCityIndex: new Map(),
   densityLayer: null,
   densityMetadata: null,
   densityLegend: null,
+  densityFilter: {
+    preset: "all",
+    min: 0,
+    max: Infinity,
+    applyToClients: true,
+  },
 };
 
 function titleCase(value) {
@@ -88,6 +111,35 @@ function formatOneDecimal(value) {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function normalizeGeoText(value) {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function municipalityKey(city, state = "") {
+  return `${normalizeGeoText(city)}|${(state || "").toUpperCase().trim()}`;
+}
+
+function cityKey(city) {
+  return normalizeGeoText(city);
+}
+
+function getActiveDensityRange() {
+  const { preset, min, max } = ui.densityFilter;
+  if (preset !== "custom") {
+    return DENSITY_PRESETS[preset] || DENSITY_PRESETS.all;
+  }
+  return { min: Number(min) || 0, max: Number(max) || Infinity, label: "Faixa personalizada" };
+}
+
+function isDensityInRange(value, range = getActiveDensityRange()) {
+  if (typeof value !== "number" || Number.isNaN(value)) return false;
+  return value >= range.min && value <= range.max;
 }
 
 function densityColor(value) {
@@ -158,7 +210,8 @@ function categoryPill(categoryId, label) {
 
 function createClientPopupHtml(feature) {
   const props = feature.properties;
-  const address = `${props.streetNumber}, ${titleCase(props.neighborhood)}, ${titleCase(props.city)}`;
+  const cityWithState = props.state ? `${titleCase(props.city)} - ${props.state}` : titleCase(props.city);
+  const address = `${props.streetNumber}, ${titleCase(props.neighborhood)}, ${cityWithState}`;
   const dealIds = Array.isArray(props.dealIds) && props.dealIds.length > 0 ? props.dealIds.join(", ") : "Não informado";
 
   return `
@@ -174,12 +227,13 @@ function createClientPopupHtml(feature) {
 
 function createDensityPopupHtml(feature) {
   const props = feature.properties;
+  const municipalityLabel = props.uf ? `${props.name} - ${props.uf}` : props.name;
   return `
     <div class="client-popup">
       <span class="client-popup__pill" style="background:${densityColor(props.density)}; color:#111827;">
         Densidade IBGE
       </span>
-      <h3>${props.name}</h3>
+      <h3>${municipalityLabel}</h3>
       <p><strong>Densidade demográfica:</strong> ${formatOneDecimal(props.density)} hab./km²</p>
       <p><strong>População residente:</strong> ${formatNumber(props.population)}</p>
       <p><strong>Área territorial:</strong> ${formatOneDecimal(props.areaKm2)} km²</p>
@@ -199,6 +253,71 @@ function createClusterGroup(categoryId) {
       return createClusterIcon(categoryId, cluster.getChildCount());
     },
   });
+}
+
+function renderDensityDecisionPanel() {
+  const panel = document.createElement("section");
+  panel.className = "sidebar__panel decision-panel";
+  panel.innerHTML = `
+    <h2>Decisão por densidade</h2>
+    <p class="decision-hint">Priorize municípios com maior concentração populacional para aumentar potencial comercial por território.</p>
+    <div class="decision-controls">
+      <label for="density-preset">Estratégia</label>
+      <select id="density-preset">
+        <option value="all">Sem recorte (todas)</option>
+        <option value="high">Alta densidade (>= 120 hab./km²)</option>
+        <option value="veryHigh">Muito alta (>= 500 hab./km²)</option>
+        <option value="extreme">Extrema (>= 1000 hab./km²)</option>
+        <option value="custom">Faixa personalizada</option>
+      </select>
+      <div class="decision-range">
+        <div>
+          <label for="density-min">Mínimo</label>
+          <input id="density-min" type="number" min="0" step="1" value="120" disabled>
+        </div>
+        <div>
+          <label for="density-max">Máximo</label>
+          <input id="density-max" type="number" min="0" step="1" placeholder="Sem limite" disabled>
+        </div>
+      </div>
+      <label class="decision-check">
+        <input id="density-apply-clients" type="checkbox" checked>
+        <span>Aplicar recorte também aos clientes</span>
+      </label>
+    </div>
+    <dl class="decision-kpis" id="density-summary">
+      <div><dt>Municípios alvo</dt><dd>-</dd></div>
+      <div><dt>População alvo</dt><dd>-</dd></div>
+      <div><dt>Clientes no alvo</dt><dd>-</dd></div>
+      <div><dt>Densidade média</dt><dd>-</dd></div>
+    </dl>
+  `;
+
+  const targetPanel = ui.stats?.closest(".sidebar__panel");
+  targetPanel?.insertAdjacentElement("afterend", panel);
+
+  ui.densityDecisionPanel = panel;
+  ui.densityPresetSelect = panel.querySelector("#density-preset");
+  ui.densityMinInput = panel.querySelector("#density-min");
+  ui.densityMaxInput = panel.querySelector("#density-max");
+  ui.densityApplyToClients = panel.querySelector("#density-apply-clients");
+  ui.densitySummary = panel.querySelector("#density-summary");
+
+  const onDecisionChange = async () => {
+    ui.densityFilter.preset = ui.densityPresetSelect.value;
+    const isCustom = ui.densityFilter.preset === "custom";
+    ui.densityMinInput.disabled = !isCustom;
+    ui.densityMaxInput.disabled = !isCustom;
+    ui.densityFilter.min = Number(ui.densityMinInput.value || 0);
+    ui.densityFilter.max = ui.densityMaxInput.value === "" ? Infinity : Number(ui.densityMaxInput.value);
+    ui.densityFilter.applyToClients = ui.densityApplyToClients.checked;
+    await applyDensityDecisionFilter();
+  };
+
+  ui.densityPresetSelect.addEventListener("change", onDecisionChange);
+  ui.densityMinInput.addEventListener("input", onDecisionChange);
+  ui.densityMaxInput.addEventListener("input", onDecisionChange);
+  ui.densityApplyToClients.addEventListener("change", onDecisionChange);
 }
 
 function renderToggles() {
@@ -274,7 +393,7 @@ function updateStats() {
   const activeLayers = Object.entries(LAYER_CONFIG).filter(([, config]) => config.active);
   const visibleCount = activeLayers
     .filter(([, config]) => config.type === "clients")
-    .reduce((sum, [layerId]) => sum + (ui.counts[layerId] || 0), 0);
+    .reduce((sum, [layerId]) => sum + (ui.visibleCounts[layerId] || 0), 0);
 
   document.getElementById("stat-active-layers").textContent = String(activeLayers.length);
   document.getElementById("stat-visible").textContent = String(visibleCount);
@@ -309,12 +428,59 @@ function addBoundary(boundaryFeature) {
   ui.map.setMaxBounds(boundary.getBounds().pad(0.28));
 }
 
+function resolveClientDensity(city, state = "") {
+  if (!city) return null;
+  const fullKey = municipalityKey(city, state);
+  if (state && ui.densityCityUfIndex.has(fullKey)) {
+    return ui.densityCityUfIndex.get(fullKey).density;
+  }
+  const fallbackKey = cityKey(city);
+  if (ui.densityCityIndex.has(fallbackKey)) {
+    return ui.densityCityIndex.get(fallbackKey).density;
+  }
+  return null;
+}
+
+function clientEntryPassesDensity(entry, range = getActiveDensityRange()) {
+  if (!ui.densityFilter.applyToClients) return true;
+  if (ui.densityFilter.preset === "all") return true;
+  if (entry.density == null) return true;
+  return isDensityInRange(entry.density, range);
+}
+
+function refreshClientLayers() {
+  const range = getActiveDensityRange();
+  Object.keys(ui.clientGroups).forEach((layerId) => {
+    const group = ui.clientGroups[layerId];
+    const entries = ui.clientEntriesByCategory[layerId] || [];
+    group.clearLayers();
+
+    let visible = 0;
+    entries.forEach((entry) => {
+      if (clientEntryPassesDensity(entry, range)) {
+        group.addLayer(entry.marker);
+        visible += 1;
+      }
+    });
+    ui.visibleCounts[layerId] = visible;
+
+    if (LAYER_CONFIG[layerId].active) {
+      group.addTo(ui.map);
+    } else {
+      ui.map.removeLayer(group);
+    }
+  });
+}
+
 function attachClientMarkers(featureCollection) {
+  ui.clientsFeatureCollection = featureCollection;
   Object.keys(LAYER_CONFIG)
     .filter((layerId) => LAYER_CONFIG[layerId].type === "clients")
     .forEach((layerId) => {
       ui.clientGroups[layerId] = createClusterGroup(layerId);
+      ui.clientEntriesByCategory[layerId] = [];
       ui.counts[layerId] = 0;
+      ui.visibleCounts[layerId] = 0;
     });
 
   featureCollection.features.forEach((feature) => {
@@ -332,15 +498,16 @@ function attachClientMarkers(featureCollection) {
       className: "city-tooltip",
     });
 
-    ui.clientGroups[categoryId].addLayer(marker);
+    ui.clientEntriesByCategory[categoryId].push({
+      marker,
+      city: feature.properties.city,
+      state: feature.properties.state || "",
+      density: null,
+    });
     ui.counts[categoryId] += 1;
   });
 
-  Object.entries(LAYER_CONFIG)
-    .filter(([, config]) => config.type === "clients" && config.active)
-    .forEach(([layerId]) => {
-      ui.clientGroups[layerId].addTo(ui.map);
-    });
+  refreshClientLayers();
 }
 
 function buildDensityLegend() {
@@ -371,11 +538,13 @@ function buildDensityLegend() {
 }
 
 function styleDensityFeature(feature) {
+  const densityValue = feature.properties.density;
+  const inRange = isDensityInRange(densityValue);
   return {
     pane: "densityPane",
-    color: "rgba(88, 59, 12, 0.25)",
-    weight: 0.7,
-    fillOpacity: 0.72,
+    color: inRange ? "rgba(88, 59, 12, 0.25)" : "rgba(107, 114, 128, 0.18)",
+    weight: inRange ? 0.7 : 0.35,
+    fillOpacity: inRange ? 0.72 : 0.1,
     fillColor: densityColor(feature.properties.density),
   };
 }
@@ -384,6 +553,7 @@ function onEachDensityFeature(feature, layer) {
   layer.bindPopup(createDensityPopupHtml(feature), { maxWidth: 340 });
   layer.on({
     mouseover() {
+      if (!isDensityInRange(feature.properties.density)) return;
       layer.setStyle({
         weight: 1.4,
         color: "#1f2937",
@@ -397,6 +567,109 @@ function onEachDensityFeature(feature, layer) {
   });
 }
 
+function indexDensityData(densityData) {
+  ui.densityCityUfIndex = new Map();
+  const byCity = new Map();
+
+  densityData.features.forEach((feature) => {
+    const { name, uf, density, population } = feature.properties;
+    const byUfKey = municipalityKey(name, uf);
+    ui.densityCityUfIndex.set(byUfKey, { density, population });
+
+    const cityOnlyKey = cityKey(name);
+    if (!byCity.has(cityOnlyKey)) {
+      byCity.set(cityOnlyKey, []);
+    }
+    byCity.get(cityOnlyKey).push({ density, population, uf });
+  });
+
+  ui.densityCityIndex = new Map();
+  byCity.forEach((items, key) => {
+    if (items.length === 1) {
+      ui.densityCityIndex.set(key, items[0]);
+    }
+  });
+}
+
+function updateClientDensityBindings() {
+  Object.values(ui.clientEntriesByCategory).forEach((entries) => {
+    entries.forEach((entry) => {
+      entry.density = resolveClientDensity(entry.city, entry.state);
+    });
+  });
+}
+
+function updateDensityStyles() {
+  if (!ui.densityLayer) return;
+  ui.densityLayer.setStyle((feature) => styleDensityFeature(feature));
+}
+
+function updateDecisionSummary() {
+  if (!ui.densitySummary) return;
+  if (!ui.densityLayer) {
+    const totalClients = Object.values(ui.counts).reduce((sum, value) => sum + value, 0);
+    const values = ["-", "-", String(totalClients), "-"];
+    ui.densitySummary.querySelectorAll("dd").forEach((node, index) => {
+      node.textContent = values[index];
+    });
+    return;
+  }
+  const range = getActiveDensityRange();
+
+  let municipalityCount = 0;
+  let populationSum = 0;
+  let densitySum = 0;
+
+  ui.densityLayer.eachLayer((layer) => {
+    const density = layer.feature?.properties?.density;
+    if (!isDensityInRange(density, range)) return;
+    municipalityCount += 1;
+    populationSum += Number(layer.feature.properties.population || 0);
+    densitySum += Number(density || 0);
+  });
+
+  let clientsInScope = 0;
+  const rangeIsAll = ui.densityFilter.preset === "all";
+  Object.values(ui.clientEntriesByCategory).forEach((entries) => {
+    entries.forEach((entry) => {
+      if (rangeIsAll) {
+        clientsInScope += 1;
+        return;
+      }
+      if (entry.density != null && isDensityInRange(entry.density, range)) {
+        clientsInScope += 1;
+      }
+    });
+  });
+
+  const avgDensity = municipalityCount > 0 ? densitySum / municipalityCount : 0;
+  const values = [
+    String(municipalityCount),
+    formatNumber(populationSum),
+    String(clientsInScope),
+    municipalityCount > 0 ? `${formatOneDecimal(avgDensity)} hab./km²` : "-",
+  ];
+
+  ui.densitySummary.querySelectorAll("dd").forEach((node, index) => {
+    node.textContent = values[index];
+  });
+}
+
+async function applyDensityDecisionFilter() {
+  const shouldLoadDensity =
+    LAYER_CONFIG.densidade.active || ui.densityFilter.preset !== "all";
+
+  if (shouldLoadDensity) {
+    await loadDensityLayer();
+    updateClientDensityBindings();
+    updateDensityStyles();
+  }
+
+  refreshClientLayers();
+  updateDecisionSummary();
+  updateStats();
+}
+
 async function loadDensityLayer() {
   if (ui.densityLayer) return;
 
@@ -404,6 +677,7 @@ async function loadDensityLayer() {
   const densityData = await response.json();
 
   ui.densityMetadata = densityData.metadata;
+  indexDensityData(densityData);
   ui.densityLayer = L.geoJSON(densityData, {
     style: styleDensityFeature,
     onEachFeature: onEachDensityFeature,
@@ -418,8 +692,11 @@ async function toggleDensityLayer(isActive) {
     ui.loading.querySelector("p").textContent = "Carregando densidade populacional oficial do IBGE...";
     try {
       await loadDensityLayer();
+      updateClientDensityBindings();
+      updateDensityStyles();
       ui.densityLayer.addTo(ui.map);
       ui.densityLegend.addTo(ui.map);
+      updateDecisionSummary();
     } finally {
       ui.loading.classList.add("is-hidden");
       ui.loading.querySelector("p").textContent = "Carregando mapa e clientes...";
@@ -433,6 +710,7 @@ async function toggleDensityLayer(isActive) {
   if (ui.densityLegend) {
     ui.densityLegend.remove();
   }
+  updateDecisionSummary();
 }
 
 function setupMobileSidebar() {
@@ -442,10 +720,11 @@ function setupMobileSidebar() {
 }
 
 async function loadBaseData() {
-  const [clientsResponse, boundaryResponse] = await Promise.all([
-    fetch("./data/clients.geojson"),
-    fetch("./data/minas-gerais.geojson"),
-  ]);
+  const clientsResponse = await fetch("./data/clients.geojson");
+  let boundaryResponse = await fetch("./data/brasil.geojson");
+  if (!boundaryResponse.ok) {
+    boundaryResponse = await fetch("./data/minas-gerais.geojson");
+  }
 
   const clients = await clientsResponse.json();
   const boundary = await boundaryResponse.json();
@@ -455,6 +734,7 @@ async function loadBaseData() {
 async function init() {
   createMap();
   renderToggles();
+  renderDensityDecisionPanel();
   setupMobileSidebar();
 
   try {
@@ -462,6 +742,8 @@ async function init() {
     addBoundary(boundary);
     attachClientMarkers(clients);
     renderStats(clients.metadata.totalFeatures);
+    refreshClientLayers();
+    updateDecisionSummary();
     updateStats();
   } catch (error) {
     console.error(error);

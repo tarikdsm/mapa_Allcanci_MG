@@ -188,6 +188,80 @@ body { min-height: 100vh; }
   font-weight: 700;
 }
 
+.decision-hint {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.decision-controls {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.decision-controls label {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.decision-controls select,
+.decision-controls input[type="number"] {
+  width: 100%;
+  border: 1px solid rgba(32, 49, 54, 0.16);
+  border-radius: 12px;
+  padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text);
+  font-family: inherit;
+}
+
+.decision-range {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.decision-check {
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text) !important;
+  font-size: 0.82rem !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+.decision-kpis {
+  margin: 14px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.decision-kpis div {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(248, 244, 238, 0.86);
+  border: 1px solid rgba(32, 49, 54, 0.08);
+}
+
+.decision-kpis dt {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.decision-kpis dd {
+  margin: 5px 0 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
 .notes {
   margin: 0;
   padding-left: 18px;
